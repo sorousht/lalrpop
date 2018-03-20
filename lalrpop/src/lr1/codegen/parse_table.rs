@@ -164,9 +164,10 @@ impl<'ascent, 'grammar, W: Write> CodeGenerator<'ascent, 'grammar, W, TableDrive
 
     fn write(&mut self) -> io::Result<()> {
         self.write_parse_mod(|this| {
-            // try!(this.write_machine_definition());
             try!(this.write_value_type_defn());
             try!(this.write_parse_table());
+            try!(this.write_machine_definition());
+            try!(this.write_token_to_integer_fn());
             try!(this.write_parser_fn());
             try!(this.write_error_recovery_fn());
             try!(this.write_accepts_fn());
@@ -178,6 +179,7 @@ impl<'ascent, 'grammar, W: Write> CodeGenerator<'ascent, 'grammar, W, TableDrive
 
     fn write_machine_definition(&mut self) -> io::Result<()> {
         let symbol_type_params = Sep(", ", &self.custom.symbol_type_params);
+        let symbol_where_clauses = Sep(", ", &self.custom.symbol_where_clauses);
         // let parse_error_type = self.types.parse_error_type();
         let error_type = self.types.error_type();
         let token_type = self.types.terminal_token_type();
@@ -186,6 +188,7 @@ impl<'ascent, 'grammar, W: Write> CodeGenerator<'ascent, 'grammar, W, TableDrive
         let loc_type = self.types.terminal_loc_type();
         // let actions_per_state = self.grammar.terminals.all.len();
         let start_type = self.types.nonterminal_type(&self.start_symbol);
+        let state_type = self.custom.state_type;
 
         rust!(
             self.out,
@@ -197,77 +200,174 @@ impl<'ascent, 'grammar, W: Write> CodeGenerator<'ascent, 'grammar, W, TableDrive
 
         rust!(
             self.out,
-            "impl {p}lalrpop_util::state_machine::ParserDefinition for {p}StateMachine<{stp}> {{",
+            "impl<{stp}> {p}state_machine::ParserDefinition for {p}StateMachine<{stp}>",
             p = self.prefix,
-            stp = symbol_type_params
+            stp = symbol_type_params,
         );
+        rust!(self.out, "where {swc}", swc = symbol_where_clauses);
+        rust!(self.out, "{{");
         rust!(self.out, "type Location = {t};", t = loc_type);
         rust!(self.out, "type Error = {t};", t = error_type);
         rust!(self.out, "type Token = {t};", t = token_type);
-        rust!(self.out, "type Symbol = {p}Symbol<{stp}>;", p = self.prefix, stp = symbol_type_params);
+        rust!(
+            self.out,
+            "type Symbol = {p}Symbol<{stp}>;",
+            p = self.prefix,
+            stp = symbol_type_params
+        );
         rust!(self.out, "type Success = {t};", t = start_type);
+        rust!(self.out, "type StateIndex = {t};", t = state_type);
+        rust!(self.out, "type Action = {t};", t = state_type);
+        rust!(self.out, "type ReduceIndex = {t};", t = state_type);
+        rust!(self.out, "type NonterminalIndex = usize;");
 
         rust!(self.out, "");
+        rust!(self.out, "#[inline]");
         rust!(self.out, "fn start_location(&self) -> Self::Location {{");
         rust!(self.out, "  Default::default()");
         rust!(self.out, "}}");
 
         rust!(self.out, "");
-        rust!(self.out, "fn token_to_integer(&self, token: &Self::Token) -> Option<usize> {{");
+        rust!(self.out, "#[inline]");
+        rust!(
+            self.out,
+            "fn token_to_integer(&self, token: &Self::Token) -> Option<usize> {{"
+        );
         rust!(self.out, "{p}token_to_integer(token)", p = self.prefix);
         rust!(self.out, "}}");
 
         rust!(self.out, "");
-        rust!(self.out, "fn action(&self, state: i32, integer: usize) -> i32 {{");
-        rust!(self.out, "{p}action(state, integer)", p = self.prefix);
+        rust!(self.out, "#[inline]");
+        rust!(
+            self.out,
+            "fn action(&self, state: {state_type}, integer: usize) -> {state_type} {{",
+            state_type = state_type
+        );
+        rust!(
+            self.out,
+            "{p}ACTION[((state * {num_term}) as usize) + integer]",
+            p = self.prefix,
+            num_term = self.grammar.terminals.all.len(),
+        );
         rust!(self.out, "}}");
 
         rust!(self.out, "");
-        rust!(self.out, "fn error_action(&self, state: i32) -> i32 {{");
-        rust!(self.out, "{p}error_action(state)", p = self.prefix);
+        rust!(self.out, "#[inline]");
+        rust!(
+            self.out,
+            "fn error_action(&self, state: {state_type}) -> {state_type} {{",
+            state_type = state_type,
+        );
+        rust!(
+            self.out,
+            "{p}ACTION[((state * {num_term}) as usize) + {num_term}]",
+            p = self.prefix,
+            num_term = self.grammar.terminals.all.len(),
+        );
         rust!(self.out, "}}");
 
         rust!(self.out, "");
-        rust!(self.out, "fn eof_action(&self, state: i32) -> i32 {{");
-        rust!(self.out, "{p}eof_action(state)", p = self.prefix);
+        rust!(self.out, "#[inline]");
+        rust!(
+            self.out,
+            "fn eof_action(&self, state: {state_type}) -> {state_type} {{",
+            state_type = state_type,
+        );
+        rust!(self.out, "{p}EOF_ACTION[state as usize]", p = self.prefix,);
         rust!(self.out, "}}");
 
         rust!(self.out, "");
-        rust!(self.out, "fn goto(&self, state: i32, nt: i32) -> i32 {{");
-        rust!(self.out, "{p}goto(state, nt)", p = self.prefix);
+        rust!(self.out, "#[inline]");
+        rust!(
+            self.out,
+            "fn goto(&self, state: {state_type}, nt: usize) -> {state_type} {{",
+            state_type = state_type,
+        );
+        rust!(
+            self.out,
+            "{p}GOTO[state * {num_non_term} + nt] - 1",
+            p = self.prefix,
+            num_non_term = self.grammar.nonterminals.len(),
+        );
         rust!(self.out, "}}");
 
         rust!(self.out, "");
-        rust!(self.out, "fn token_to_symbol(&self, token: Self::Token) -> Self::Symbol {{");
-        rust!(self.out, "{p}token_to_symbol(token)", p = self.prefix);
+        rust!(
+            self.out,
+            "fn token_to_symbol(&self, token: Self::Token) -> Self::Symbol {{"
+        );
+        rust!(self.out, "panic!()");
+        //rust!(self.out, "{p}token_to_symbol(token)", p = self.prefix);
         rust!(self.out, "}}");
 
         rust!(self.out, "");
-        rust!(self.out, "fn expected_tokens(&self, state: i32) -> Vec<String> {{");
-        rust!(self.out, "{p}expected_tokens(state)", p = self.prefix);
+        rust!(
+            self.out,
+            "fn expected_tokens(&self, state: i32) -> Vec<String> {{"
+        );
+        rust!(self.out, "panic!()");
+        //rust!(self.out, "{p}expected_tokens(state)", p = self.prefix);
         rust!(self.out, "}}");
 
         rust!(self.out, "");
+        rust!(self.out, "#[inline]");
         rust!(self.out, "fn uses_error_recovery(&self) -> bool {{");
         rust!(self.out, "{}", self.grammar.uses_error_recovery);
         rust!(self.out, "}}");
 
         rust!(self.out, "");
-        rust!(self.out, "fn error_recovery_symbol(&self, recovery: ErrorRecovery<Self>) -> Self::Symbol {{");
+        rust!(self.out, "#[inline]");
+        rust!(self.out, "fn error_recovery_symbol(");
+        rust!(self.out, "&self,");
+        rust!(
+            self.out,
+            "recovery: {p}state_machine::ErrorRecovery<Self>,",
+            p = self.prefix
+        );
+        rust!(self.out, ") -> Self::Symbol {{");
+        if self.grammar.uses_error_recovery {
+            let error_variant =
+                self.variant_name_for_symbol(&Symbol::Terminal(TerminalString::Error));
+            rust!(
+                self.out,
+                "{p}Symbol::{e}(recovery)",
+                p = self.prefix,
+                e = error_variant
+            );
+        } else {
+            rust!(
+                self.out,
+                "panic!(\"error recovery not enabled for this grammar\")"
+            )
+        }
         rust!(self.out, "}}");
 
         rust!(self.out, "");
         rust!(self.out, "fn reduce(");
-        rust!(self.out, "    &self,");
-        rust!(self.out, "    action: i32,");
-        rust!(self.out, "    start_location: Option<&Self::Location>,");
-        rust!(self.out, "    states: &mut Vec<i32>,");
-        rust!(self.out, "    symbols: &mut Vec<SymbolTriple<Self>>,");
-        rust!(self.out, ") -> Option<ParseResult<Self>> {{");
+        rust!(self.out, "&self,");
+        rust!(self.out, "action: i32,");
+        rust!(self.out, "start_location: Option<&Self::Location>,");
+        rust!(self.out, "states: &mut Vec<i32>,");
+        rust!(
+            self.out,
+            "symbols: &mut Vec<{p}state_machine::SymbolTriple<Self>>,",
+            p = self.prefix,
+        );
+        rust!(
+            self.out,
+            ") -> Option<{p}state_machine::ParseResult<Self>> {{",
+            p = self.prefix,
+        );
+        rust!(self.out, "panic!()");
         rust!(self.out, "}}");
 
         rust!(self.out, "");
-        rust!(self.out, "fn simulate_reduce(&self, action: i32) -> SimulatedReduce {{");
+        rust!(
+            self.out,
+            "fn simulate_reduce(&self, action: i32) -> {p}state_machine::SimulatedReduce<Self> {{",
+            p = self.prefix,
+        );
+        rust!(self.out, "panic!()");
         rust!(self.out, "}}");
 
         rust!(self.out, "}}");
@@ -681,21 +781,32 @@ impl<'ascent, 'grammar, W: Write> CodeGenerator<'ascent, 'grammar, W, TableDrive
         Ok(())
     }
 
-    fn token_to_integer_machine_fn(&mut self) -> io::Result<()> {
+    fn write_token_to_integer_fn(&mut self) -> io::Result<()> {
         let token_type = self.types.terminal_token_type();
 
-        rust!(
-            self.out,
-            "fn {p}token_to_integer({p}token: &{token_type}) -> Option<usize> {{",
-            p = self.prefix,
-            token_type = token_type,
-        );
+        let parameters = vec![
+            format!(
+                "{p}token: &{token_type}",
+                p = self.prefix,
+                token_type = token_type,
+            ),
+            format!("_: {}", self.phantom_data_type()),
+        ];
 
-        rust!(
-            self.out,
-            "match {p}token {{",
-            p = self.prefix
-        );
+        try!(self.out.write_fn_header(
+            self.grammar,
+            &Visibility::Priv,
+            format!("{p}token_to_integer", p = self.prefix),
+            vec![],
+            None, // no self
+            false, // do not include grammar parameters
+            parameters,
+            format!("Option<usize>"),
+            vec![],
+        ));
+        rust!(self.out, "{{");
+
+        rust!(self.out, "match {p}token {{", p = self.prefix);
 
         for (terminal, index) in self.grammar.terminals.all.iter().zip(0..) {
             if *terminal == TerminalString::Error {
@@ -1059,7 +1170,7 @@ impl<'ascent, 'grammar, W: Write> CodeGenerator<'ascent, 'grammar, W, TableDrive
         Ok(())
     }
 
-    fn variant_name_for_symbol(&mut self, s: &Symbol) -> String {
+    fn variant_name_for_symbol(&self, s: &Symbol) -> String {
         self.custom.variant_names[s].clone()
     }
 
