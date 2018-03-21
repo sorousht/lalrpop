@@ -178,8 +178,8 @@ impl<'ascent, 'grammar, W: Write> CodeGenerator<'ascent, 'grammar, W, TableDrive
     }
 
     fn write_machine_definition(&mut self) -> io::Result<()> {
-        let symbol_type_params = Sep(", ", &self.custom.symbol_type_params);
-        let symbol_where_clauses = Sep(", ", &self.custom.symbol_where_clauses);
+        let grammar_type_params = Sep(", ", &self.grammar.type_parameters);
+        let grammar_where_clauses = Sep(", ", &self.grammar.where_clauses);
         // let parse_error_type = self.types.parse_error_type();
         let error_type = self.types.error_type();
         let token_type = self.types.terminal_token_type();
@@ -189,22 +189,39 @@ impl<'ascent, 'grammar, W: Write> CodeGenerator<'ascent, 'grammar, W, TableDrive
         // let actions_per_state = self.grammar.terminals.all.len();
         let start_type = self.types.nonterminal_type(&self.start_symbol);
         let state_type = self.custom.state_type;
+        let phantom_data_type = self.phantom_data_type();
 
         rust!(
             self.out,
-            "pub struct {p}StateMachine<{stp}> {{",
+            "pub struct {p}StateMachine<{gtp}>",
             p = self.prefix,
-            stp = symbol_type_params
+            gtp = grammar_type_params
+        );
+        rust!(self.out, "where {gwc}", gwc = grammar_where_clauses);
+        rust!(self.out, "{{");
+        for param in &self.grammar.parameters {
+            rust!(
+                self.out,
+                "{name}: {ty},",
+                name = param.name,
+                ty = param.ty,
+            );
+        }
+        rust!(
+            self.out,
+            "{p}phantom: {phantom},",
+            p = self.prefix,
+            phantom = phantom_data_type,
         );
         rust!(self.out, "}}");
 
         rust!(
             self.out,
-            "impl<{stp}> {p}state_machine::ParserDefinition for {p}StateMachine<{stp}>",
+            "impl<{gtp}> {p}state_machine::ParserDefinition for {p}StateMachine<{gtp}>",
             p = self.prefix,
-            stp = symbol_type_params,
+            gtp = grammar_type_params,
         );
-        rust!(self.out, "where {swc}", swc = symbol_where_clauses);
+        rust!(self.out, "where {gwc}", gwc = grammar_where_clauses);
         rust!(self.out, "{{");
         rust!(self.out, "type Location = {t};", t = loc_type);
         rust!(self.out, "type Error = {t};", t = error_type);
@@ -213,7 +230,7 @@ impl<'ascent, 'grammar, W: Write> CodeGenerator<'ascent, 'grammar, W, TableDrive
             self.out,
             "type Symbol = {p}Symbol<{stp}>;",
             p = self.prefix,
-            stp = symbol_type_params
+            stp = Sep(", ", &self.custom.symbol_type_params),
         );
         rust!(self.out, "type Success = {t};", t = start_type);
         rust!(self.out, "type StateIndex = {t};", t = state_type);
