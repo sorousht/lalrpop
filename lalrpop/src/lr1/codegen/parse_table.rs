@@ -322,8 +322,7 @@ impl<'ascent, 'grammar, W: Write> CodeGenerator<'ascent, 'grammar, W, TableDrive
             self.out,
             "fn expected_tokens(&self, state: i32) -> Vec<String> {{"
         );
-        rust!(self.out, "panic!()");
-        //rust!(self.out, "{p}expected_tokens(state)", p = self.prefix);
+        rust!(self.out, "{p}expected_tokens(state)", p = self.prefix);
         rust!(self.out, "}}");
 
         rust!(self.out, "");
