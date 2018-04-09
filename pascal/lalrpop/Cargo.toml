@@ -1,0 +1,18 @@
+[package]
+name = "pascal"
+version = "0.11.0"
+authors = ["Niko Matsakis <niko@alum.mit.edu>"]
+build = "build.rs"
+
+[build-dependencies.lalrpop]
+path = "../../../lalrpop"
+
+[dependencies]
+docopt = "0.8"
+regex = "0.2.1"
+serde = "1.0"
+serde_derive = "1.0"
+
+[dependencies.lalrpop-util]
+version = "0.15.1"
+path = "../../../lalrpop-util"
